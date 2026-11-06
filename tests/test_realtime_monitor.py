@@ -67,7 +67,7 @@ def test_binance_crypto_provider(monkeypatch):
     provider = BinanceCryptoProvider()
 
     def fake_get(url, **kwargs):
-        assert "symbols=" in kwargs.get("params", {}).get("symbols", "") or True
+        assert kwargs["params"]["symbols"] == '["BTCUSDT","ETHUSDT"]'
         return SimpleNamespace(
             status_code=200,
             raise_for_status=lambda: None,

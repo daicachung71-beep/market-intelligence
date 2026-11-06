@@ -5,6 +5,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -118,6 +119,7 @@ def test_command_rate_limit_and_allowlist(tmp_path, monkeypatch):
     assert "/start" not in COMMANDS
     with pytest.raises(ValueError, match="not allowlisted"):
         sign_command("/start", "command-admin", SECRET)
+    assert "/stop-monitor" in COMMANDS
 
 
 def test_phone_sender_uses_listener_signature_protocol():
@@ -126,6 +128,43 @@ def test_phone_sender_uses_listener_signature_protocol():
     verified = _verify_message(json.dumps(envelope), SECRET, now)
     assert verified["command"] == "/status"
     assert verified["actor"] == "command-admin"
+    assert build_envelope(
+        "/stop-monitor", "command-admin", SECRET, timestamp=now
+    )["command"] == "/stop-monitor"
+
+
+def test_stop_monitor_uses_only_fixed_systemd_user_command(monkeypatch):
+    calls = []
+
+    def run_fixed(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("backend.command_listener.subprocess.run", run_fixed)
+
+    result = _dispatch("/stop-monitor", Path("unused"))
+
+    assert "stopped and disabled" in result
+    assert calls[0][0] == [
+        "systemctl",
+        "--user",
+        "disable",
+        "--now",
+        "market-realtime-monitor.service",
+    ]
+    assert calls[0][1]["shell"] is False
+    assert calls[0][1]["stdin"] == subprocess.DEVNULL
+    assert calls[0][1]["timeout"] == 60
+
+
+def test_stop_monitor_reports_systemd_failure(monkeypatch):
+    monkeypatch.setattr(
+        "backend.command_listener.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=1),
+    )
+
+    with pytest.raises(CommandExecutionError, match="monitor_stop_failed"):
+        _dispatch("/stop-monitor", Path("unused"))
 
 
 def test_poll_uses_ntfy_json_poll_protocol():
@@ -190,6 +229,29 @@ def test_read_only_commands_return_local_database_state(tmp_path):
     assert "Social monitor" in _dispatch("/social", db_path)
     assert "No price alerts" in _dispatch("/alerts", db_path)
     assert "Commands:" in _dispatch("/help", db_path)
+
+
+def test_alerts_command_returns_more_than_five_recent_alerts(tmp_path):
+    db_path = tmp_path / "market.sqlite3"
+    initialize_database(db_path)
+    connection = connect(db_path)
+    try:
+        connection.executemany(
+            "INSERT INTO alert_events "
+            "(event_key, symbol, interval, rule, timestamp, change_pct, delivery_status) "
+            "VALUES (?, ?, '1h', 'test', ?, 5.0, 'sent')",
+            [
+                (f"BTC:1h:{index}", "BTC", f"2026-11-06T19:{index:02d}:00+00:00")
+                for index in range(7)
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    result = _dispatch("/alerts", db_path)
+
+    assert result.count("- BTC") == 7
 
 
 def test_collector_job_uses_fixed_no_shell_command_and_timeout(tmp_path, monkeypatch):

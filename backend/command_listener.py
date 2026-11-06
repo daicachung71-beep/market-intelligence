@@ -53,6 +53,7 @@ COMMANDS = frozenset(
         "/help",
         "/collect",
         "/backup",
+        "/stop-monitor",
     }
 )
 MAX_MESSAGE_BYTES = 4096
@@ -395,7 +396,7 @@ def _social_result(db_path: Path) -> str:
 
 
 def _alerts_result(db_path: Path) -> str:
-    alerts = get_alert_events(db_path, limit=5)
+    alerts = get_alert_events(db_path, limit=20)
     if not alerts:
         return "No price alerts recorded."
     lines = [
@@ -508,6 +509,26 @@ def _run_market_collection(db_path: Path, timeout: int = COMMAND_JOB_TIMEOUT_SEC
     )
 
 
+def _stop_realtime_monitor() -> str:
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "disable", "--now", "market-realtime-monitor.service"],
+            cwd=ROOT,
+            stdin=subprocess.DEVNULL,
+            timeout=60,
+            check=False,
+            shell=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise CommandExecutionError("monitor_stop_timeout") from exc
+    if result.returncode != 0:
+        raise CommandExecutionError("monitor_stop_failed")
+    return (
+        "Real-time monitor stopped and disabled. "
+        "To start it again locally: systemctl --user enable --now market-realtime-monitor.service"
+    )
+
+
 def _dispatch(command: str, db_path: Path) -> str:
     if command == "/status":
         return _status_result(db_path)
@@ -532,6 +553,8 @@ def _dispatch(command: str, db_path: Path) -> str:
             f"({result['bytes']} bytes; integrity={result['integrity']}; "
             f"retained={result['retained']})."
         )
+    if command == "/stop-monitor":
+        return _stop_realtime_monitor()
     raise CommandExecutionError("command_not_allowlisted")
 
 

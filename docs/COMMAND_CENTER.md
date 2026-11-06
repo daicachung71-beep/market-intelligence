@@ -1,6 +1,6 @@
 # ntfy Command Center
 
-The command listener is an optional, independent process. It is disabled by default and does not control systemd services. It accepts a fixed command allowlist, verifies an HMAC signature and timestamp, requires the named account to be an active `ADMIN`, consumes a persistent one-time nonce, and records an audit row before running a command. No message is passed to a shell.
+The command listener is an optional, independent process. It is disabled by default and only controls the real-time monitor through the fixed `/stop-monitor` command; it cannot start or control other services. It accepts a fixed command allowlist, verifies an HMAC signature and timestamp, requires the named account to be an active `ADMIN`, consumes a persistent one-time nonce, and records an audit row before running a command. No message is passed to a shell.
 
 ## Configure
 
@@ -24,13 +24,14 @@ mkdir -p ~/market-intelligence/backups
 chmod 700 ~/market-intelligence/backups
 mkdir -p ~/.config/systemd/user
 cp deploy/market-command-listener.service ~/.config/systemd/user/
+cp deploy/market-realtime-monitor.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now market-command-listener.service
-systemctl --user status market-command-listener.service
+systemctl --user enable --now market-realtime-monitor.service market-command-listener.service
+systemctl --user status market-realtime-monitor.service market-command-listener.service
 journalctl --user -u market-command-listener.service -n 100 --no-pager
 ```
 
-The service is not enabled automatically. It needs write access only to the SQLite data directory and `backups/`. Existing scheduled collection and remote `/collect` share a non-blocking lock so they cannot run concurrently.
+Run `loginctl enable-linger "$USER"` on the VPS (or have its administrator do so) so the user systemd manager and both services start at boot and continue after logout. Keep the VPS powered on with network access; a VPS that is stopped, suspended, or unreachable cannot process commands. The listener service is not enabled automatically. It needs write access only to the SQLite data directory and `backups/`. Existing scheduled collection and remote `/collect` share a non-blocking lock so they cannot run concurrently.
 
 ## Commands
 
@@ -41,7 +42,8 @@ Read-only commands:
 - `/market`: compact tracked-asset snapshot.
 - `/news`: up to three most recent stored headlines.
 - `/social`: social collection state and stored counts.
-- `/alerts`: up to five recent price alerts.
+- `/alerts`: up to twenty recent price alerts. This only limits the history shown; it does not stop monitoring.
+- `/stop-monitor`: stops and disables the real-time monitor so it will remain stopped after a reboot. To enable it again, run `systemctl --user enable --now market-realtime-monitor.service` on the VPS.
 - `/help`: allowlisted commands.
 
 Bounded jobs:
@@ -49,7 +51,7 @@ Bounded jobs:
 - `/collect`: runs only `python -m backend.run_collector`, with a fixed 300-second timeout and no caller-provided arguments. The existing provider adapters keep their own request timeouts and retry limits.
 - `/backup`: creates an SQLite online backup in `backups/`, runs `PRAGMA integrity_check`, and retains the ten newest `market_*.sqlite3` snapshots. It does not back up `.env` or model artifacts.
 
-No `/start`, `/stop`, `/restart`, arbitrary command, command arguments, or host reboot operations are supported. Run service lifecycle operations locally through systemd.
+No general `/start`, `/stop`, `/restart`, arbitrary command, command arguments, or host reboot operations are supported. `/stop-monitor` is the sole fixed service action; other lifecycle operations must be run locally through systemd.
 
 ## Send from a phone
 

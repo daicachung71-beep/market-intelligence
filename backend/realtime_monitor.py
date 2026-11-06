@@ -98,7 +98,7 @@ class BinanceCryptoProvider:
         try:
             response = session.get(
                 self.BINANCE_URL,
-                params={"symbols": json.dumps(binance_symbols)},
+                params={"symbols": json.dumps(binance_symbols, separators=(",", ":"))},
                 timeout=(3, 10),
             )
             response.raise_for_status()

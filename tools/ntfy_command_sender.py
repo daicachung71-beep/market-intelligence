@@ -22,6 +22,7 @@ COMMANDS = {
     "/help",
     "/collect",
     "/backup",
+    "/stop-monitor",
 }
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{3,48}$")
 TOPIC_PATTERN = re.compile(r"^[-_A-Za-z0-9]{1,64}$")
